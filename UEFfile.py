@@ -178,7 +178,6 @@ class UEFfile:
         while size > 0:
             i = n % 256
             s = s + chr(i)
-    #       n = n / 256
             n = n >> 8
             size = size - 1
 
