@@ -1,4 +1,4 @@
-#! /usr/bin/python
+#!/usr/bin/env python
 
 """
 UEFfile.py - Handle UEF archives.
@@ -305,7 +305,6 @@ class UEFfile:
                         # contents list, but before doing so, find the next
                         # non-block chunk and mark that as the last chunk in
                         # the file
-    #                   current_file['last position'] = find_file_end(chunks, position)
         
                         if current_file != {}:
                             self.contents.append(current_file)
@@ -531,10 +530,6 @@ class UEFfile:
         while pos < len(self.chunks):
 
             pos, chunk = self.find_next_chunk(pos, [0x100, 0x102])
-
-    #       if self.chunks[pos][0] == 0x100 or chunks[pos][0] == 0x102:
-
-    #           if len(self.chunks[pos][1]) > 1:
 
             if pos == None:
 
@@ -764,11 +759,6 @@ class UEFfile:
 
             # Increment the block number
             block_number = block_number + 1
-
-
-        # Write some finishing bytes to the list of new chunks
-    #   new_chunks.append((0x110, self.number(2,0x0258)))
-    #   new_chunks.append((0x112, self.number(2,0x0258)))
 
         # Return the list of new chunks
         return new_chunks
@@ -1117,20 +1107,18 @@ class UEFfile:
 
         for c in self.chunks:
 
-                if n % 16 == 0:
-                        sys.stdout.write(string.rjust('%i: '% n, 8))
+            if n % 16 == 0:
+                sys.stdout.write(string.rjust('%i: '% n, 8))
+            
+            if chunks_symbols.has_key(c[0]):
+                sys.stdout.write(chunks_symbols[c[0]])
+            else:
+                # Unknown
+                sys.stdout.write('? ')
 
-                if chunks_symbols.has_key(c[0]):
+            if n % 16 == 15:
+                sys.stdout.write('\n')
 
-                    sys.stdout.write(chunks_symbols[c[0]])
-
-                else:
-                        # Unknown
-                        sys.stdout.write('? ')
-
-                if n % 16 == 15:
-                        sys.stdout.write('\n')
-
-                n = n + 1
+            n = n + 1
 
         print

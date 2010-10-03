@@ -1,4 +1,4 @@
-#! /usr/bin/python
+#!/usr/bin/env python
 
 """
 UEFtrans.py - Catalogue UEF archives or add and remove files.
