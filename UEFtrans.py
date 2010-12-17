@@ -60,29 +60,6 @@ def str2num(size, s):
     return n
 
 
-def hex2num(s):
-    """number = hex2num(string)
-    
-    Convert a string of hexadecimal digits to an integer.
-    """
-    
-    n = 0
-    
-    for i in range(0,len(s)):
-    
-        a = ord(s[len(s)-i-1])
-        if (a >= 48) & (a <= 57):
-            n = n | ((a-48) << (i*4))
-        elif (a >= 65) & (a <= 70):
-            n = n | ((a-65+10) << (i*4))
-        elif (a >= 97) & (a <= 102):
-            n = n | ((a-97+10) << (i*4))
-        else:
-            return None
-    
-    return n
-
-
 # CRC calculation routines (begin)
 
 def rol(n, c):
@@ -609,8 +586,8 @@ def create_chunks(file_names):
             real_name = get_leafname(name)
             load, exe = details[0], details[1]
         
-        load = hex2num(load)
-        exe = hex2num(exe)
+        load = int(load, 16)
+        exe = int(exe, 16)
         
         if load == None or exe == None:
             print 'Problem with %s: information is possibly incorrect.' % \
@@ -707,7 +684,7 @@ def encode_chunks(file_names):
         
             # Hexadecimal number
             try:
-                new_chunks.append( (hex2num(leafname[hexsuffix+3:]), open(name, 'rb').read()) )
+                new_chunks.append( (int(leafname[hexsuffix+3:], 16), open(name, 'rb').read()) )
             except IOError:
                 print "Couldn't insert file %s as chunk." % name
                 sys.exit()
@@ -777,11 +754,7 @@ def export_file(out_path, chunks, name, write_name, load, exe, length):
     if inf_file != None:
     
         # Write information to the .inf file
-        inf_file.write(
-            '$.'+name+'\t' + string.upper(
-                hex(load)[2:]+'\t' + hex(exe)[2:]+'\t' + hex(length)[2:]
-                ) +'\n'
-            )
+        inf_file.write('$.%s\t%x\t%x\t%x\n' % (name, load, exe, length))
         
         # Read the blocks from the UEF file and write
         # them to the file
@@ -1678,9 +1651,9 @@ if __name__ == '__main__':
                     string.ljust(str(file_number), 3)+': ' +
                     string.ljust(new_name, 16) +
                     string.upper(
-                        string.ljust(hex(file['load'])[2:], 10) +'\t' +
-                        string.ljust(hex(file['exec'])[2:], 10) +'\t' +
-                        string.ljust(hex(len(file['data']))[2:], 6)
+                        string.ljust("%x" % file['load'], 10) +'\t' +
+                        string.ljust("%x" % file['exec'], 10) +'\t' +
+                        string.ljust("%x" % len(file['data']), 6)
                         ) +'\t' +
                     'chunks %i to %i' % (
                         file['position'], file['last position']
@@ -1773,9 +1746,9 @@ if __name__ == '__main__':
                         string.ljust(str(file_number), 3)+': ' +
                         string.ljust(new_name, 16) +
                         string.upper(
-                            string.ljust(hex(file['load'])[2:], 10) +'\t' +
-                            string.ljust(hex(file['exec'])[2:], 10) +'\t' +
-                            string.ljust(hex(len(file['data']))[2:], 6)
+                            string.ljust("%x" % file['load'], 10) +'\t' +
+                            string.ljust("%x" % file['exec'], 10) +'\t' +
+                            string.ljust("%x" % len(file['data']), 6)
                             ) +'\t' +
                         'chunks %i to %i' % (
                             file['position'], file['last position']
