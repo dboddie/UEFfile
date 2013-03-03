@@ -1,0 +1,15 @@
+Source: python-ueffile
+Section: python
+Priority: optional
+Maintainer: David Boddie <david@boddie.org.uk>
+Build-Depends: debhelper (>= 5.0.38), python-all-dev (>= 2.3.5-11), python-central (>= 0.5.6)
+XS-Python-Version: all
+Standards-Version: 3.7.2.1
+
+Package: python-ueffile
+Architecture: all
+Depends: ${python:Depends}
+XB-Python-Version: ${python:Versions}
+Description: UEF file handling support for Python
+ The UEFfile module provides classes for reading and writing Universal
+ Emulator Format (UEF) files.
