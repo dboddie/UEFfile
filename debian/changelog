@@ -1,3 +1,9 @@
+python-ueffile (0.21.0-1) testing; urgency=low
+
+  * Added support for importing files with gaps between them.
+
+ -- David Boddie <david@boddie.org.uk>  Sun, 03 Mar 2013 19:45:45 +0100
+
 python-ueffile (0.20.0-1) testing; urgency=low
 
   * Initial package release.
