@@ -523,18 +523,24 @@ def write_chunks(file, chunks):
         chunk(file, c[0], c[1])
 
 
-def create_chunks(file_names):
-    """create_chunks(file_names)
+def create_chunks(file_names, gaps = True):
+    """create_chunks(file_names, gaps = True)
     
     Traverse the list of filenames to insert, reading the relevant
     information, creating suitable chunks, and inserting them into
-    the list of chunks.
+    the list of chunks. If gaps is True then insert a gap before
+    each file.
     """
     
     new_chunks = []
     
     for name in file_names:
     
+        if gaps:
+            new_chunks += [(0x112, "\xdc\x05"),
+                           (0x110, "\xdc\x05"),
+                           (0x100, "\xdc")]
+        
         # Find the .inf file and read the details stored within
         try:
             details = open(name + suffix + 'inf', 'r').readline()
