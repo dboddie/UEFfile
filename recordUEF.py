@@ -60,11 +60,15 @@ def find_option(args, label, number = 0):
 
 class Reader:
 
-    def __init__(self, format, step, midpoint):
+    def __init__(self, format, step, dt, reverse_polarity):
     
         self.format = format
         self.step = step
-        self.midpoint = midpoint
+        self.reverse_polarity = reverse_polarity
+        
+        samples_per_second = 1.0/dt
+        self.weight = samples_per_second
+        self.mean = 0
         
         self.T = 0
     
@@ -86,9 +90,13 @@ class Reader:
                 raise StopIteration
             
             values = struct.unpack(format, sample)
-            value = values[0] - self.midpoint
+            value = values[0]
+            if self.reverse_polarity:
+                value = -value
             
-            if value > 0:
+            self.mean = (value/self.weight) + self.mean * (1 - 1/self.weight)
+            
+            if value > self.mean:
                 if sign == "-":
                     f = 1.0/t
                     if 2000 <= f <= 2800:
@@ -98,37 +106,37 @@ class Reader:
                     else:
                         new_current = None
                     
-                    if current != new_current:
-                        cycles = 0
-                    else:
-                        cycles += 1
-                    
                     current = new_current
-                    print state, current, cycles
                     
-                    if current == "high" and cycles == 2:
-                        if state == "data":
-                            bits = (bits >> 1) | 0x80
-                            shift += 1
-                        elif state == "waiting":
+                    if current == "high":
+                        if state == "waiting":
                             state = "ready"
+                            #print self.T, state
                         elif state == "after":
                             state = "ready"
+                            #print self.T, state
                             yield bits
-                        
-                        cycles = 0
+                        elif state == "data":
+                            cycles += 1
+                            if cycles == 2:
+                                bits = (bits >> 1) | 0x80
+                                shift += 1
+                                cycles = 0
                     
-                    elif current == "low" and cycles == 1:
+                    elif current == "low":
                         if state == "data":
                             bits = bits >> 1
                             shift += 1
+                        
                         elif state == "ready":
                             state = "data"
+                            #print self.T, state
                             bits = 0
                         
                         cycles = 0
                     
                     if shift == 8:
+                        #print hex(bits)
                         state = "after"
                         shift = 0
                     
@@ -139,7 +147,7 @@ class Reader:
                 
                 sign = "+"
             
-            elif value < 0:
+            elif value < self.mean:
                 sign = "-"
                 t += dt
             else:
@@ -156,6 +164,7 @@ if __name__ == "__main__":
     mono = find_option(args, "--mono", 0)
     unsigned = find_option(args, "--unsigned", 0)
     s, sample_size = find_option(args, "--size", 1)
+    reverse_polarity = find_option(args, "--reverse", 0)
     
     if len(args) != 2 or not s or not r:
         sys.stderr.write("Usage: %s [--rate <sample rate in Hz>] [--mono] [--unsigned] [--size <sample size in bits>] <audio file> <UEF file>\n" % program_name)
@@ -170,8 +179,6 @@ if __name__ == "__main__":
         audio_f = open(audio_file, "rb")
     
     dt = 1.0/float(sample_rate)
-    one_dt = 0.5/2400
-    zero_dt = 0.5/1200
     
     try:
         sample_size = int(sample_size)
@@ -192,23 +199,20 @@ if __name__ == "__main__":
         step = step * 2
         format = format * 2
     
-    if unsigned:
-        format = format.upper()
-        midpoint = 1 << (sample_size - 1)
-    else:
-        midpoint = 0
-    
     format = "<" + format
-    reader = Reader(format, step, midpoint)
+    reader = Reader(format, step, dt, reverse_polarity)
     
     last_T = 0
+    data = []
     
     for byte in reader.read_samples(audio_f):
     
-        print hex(byte),
+        data.append(byte)
+        #print reader.T, hex(byte)
         if int(reader.T) > last_T:
             last_T = int(reader.T)
-            print
-            print ">", last_T
+            sys.stdout.write("\r%02i:%02i:%02i" % (last_T/3600, (last_T/60) % 60, last_T % 60))
+            sys.stdout.flush()
+            #print ">", last_T
     
-    sys.exit()
+    #sys.exit()
