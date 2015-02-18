@@ -57,6 +57,97 @@ def find_option(args, label, number = 0):
     
     return True, values
 
+
+class Reader:
+
+    def __init__(self, format, step, midpoint):
+    
+        self.format = format
+        self.step = step
+        self.midpoint = midpoint
+        
+        self.T = 0
+    
+    def read_samples(self, audio_f):
+    
+        sign = None
+        t = 0
+        state = "waiting"
+        current = None
+        cycles = 0
+        data = []
+        bits = 0
+        shift = 0
+        
+        while True:
+        
+            sample = audio_f.read(self.step)
+            if not sample:
+                raise StopIteration
+            
+            values = struct.unpack(format, sample)
+            value = values[0] - self.midpoint
+            
+            if value > 0:
+                if sign == "-":
+                    f = 1.0/t
+                    if 2000 <= f <= 2800:
+                        new_current = "high"
+                    elif 1000 <= f <= 1400:
+                        new_current = "low"
+                    else:
+                        new_current = None
+                    
+                    if current != new_current:
+                        cycles = 0
+                    else:
+                        cycles += 1
+                    
+                    current = new_current
+                    print state, current, cycles
+                    
+                    if current == "high" and cycles == 2:
+                        if state == "data":
+                            bits = (bits >> 1) | 0x80
+                            shift += 1
+                        elif state == "waiting":
+                            state = "ready"
+                        elif state == "after":
+                            state = "ready"
+                            yield bits
+                        
+                        cycles = 0
+                    
+                    elif current == "low" and cycles == 1:
+                        if state == "data":
+                            bits = bits >> 1
+                            shift += 1
+                        elif state == "ready":
+                            state = "data"
+                            bits = 0
+                        
+                        cycles = 0
+                    
+                    if shift == 8:
+                        state = "after"
+                        shift = 0
+                    
+                    t = 0
+                
+                else:
+                    t += dt
+                
+                sign = "+"
+            
+            elif value < 0:
+                sign = "-"
+                t += dt
+            else:
+                t += dt
+            
+            self.T += dt
+
+
 if __name__ == "__main__":
 
     program_name, args = sys.argv[0], sys.argv[1:]
@@ -103,91 +194,20 @@ if __name__ == "__main__":
     
     if unsigned:
         format = format.upper()
+        midpoint = 1 << (sample_size - 1)
+    else:
+        midpoint = 0
     
     format = "<" + format
-    sign = None
+    reader = Reader(format, step, midpoint)
     
-    t = 0
-    T = 0
     last_T = 0
-    state = "waiting"
-    current = None
-    cycles = 0
-    data = []
-    bits = 0
-    shift = 0
     
-    while True:
+    for byte in reader.read_samples(audio_f):
     
-        sample = audio_f.read(step)
-        if not sample:
-            break
-        
-        values = struct.unpack(format, sample)
-        value = values[0]
-        
-        if value > 0:
-            if sign == "-":
-                f = 1.0/t
-                if 2000 <= f <= 2800:
-                    new_current = "high"
-                elif 1000 <= f <= 1400:
-                    new_current = "low"
-                else:
-                    new_current = None
-                
-                if current != new_current:
-                    cycles = 0
-                else:
-                    cycles += 1
-                
-                current = new_current
-                
-                if current == "high" and cycles == 2:
-                    if state == "data":
-                        bits = (bits >> 1) | 0x80
-                        shift += 1
-                        sys.stdout.write("1")
-                        sys.stdout.flush()
-                    elif state == "waiting":
-                        state = "ready"
-                    elif state == "after":
-                        state = "waiting"
-                    
-                    cycles = 0
-                
-                elif current == "low" and cycles == 1:
-                    if state == "data":
-                        bits = bits >> 1
-                        shift += 1
-                        sys.stdout.write("0")
-                        sys.stdout.flush()
-                    elif state == "ready":
-                        state = "data"
-                    
-                    cycles = 0
-                
-                if shift == 8:
-                    state = "after"
-                    data.append(bits)
-                    shift = 0
-                
-                t = 0
-            
-            else:
-                t += dt
-            
-            sign = "+"
-        
-        elif value < 0:
-            sign = "-"
-            t += dt
-        else:
-            t += dt
-        
-        T += dt
-        if int(T) > last_T:
-            last_T = int(T)
+        print hex(byte),
+        if int(reader.T) > last_T:
+            last_T = int(reader.T)
             print
             print ">", last_T
     
