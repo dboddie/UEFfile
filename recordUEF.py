@@ -20,6 +20,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import struct, sys
+import UEFfile
 
 def find_option(args, label, number = 0):
 
@@ -58,6 +59,57 @@ def find_option(args, label, number = 0):
     return True, values
 
 
+class Block(UEFfile.UEFfile):
+
+    def __init__(self, gen):
+    
+        self.name = ""
+        header = ""
+        
+        while len(self.name) < 10:
+            byte = gen.next()
+            header += chr(byte)
+            if byte != 0:
+                self.name += chr(byte)
+            else:
+                break
+        
+        if len(self.name) == 10:
+            header += chr(gen.next())
+        
+        self.load_addr = sum(map(lambda x: gen.next() << x, range(0, 32, 8)))
+        header += struct.pack("<I", self.load_addr)
+        self.exec_addr = sum(map(lambda x: gen.next() << x, range(0, 32, 8)))
+        header += struct.pack("<I", self.exec_addr)
+        self.number = sum(map(lambda x: gen.next() << x, range(0, 16, 8)))
+        header += struct.pack("<H", self.number)
+        self.length = sum(map(lambda x: gen.next() << x, range(0, 16, 8)))
+        header += struct.pack("<H", self.length)
+        
+        #print self.name, hex(self.load_addr), hex(self.exec_addr), self.number, self.length
+        
+        if self.length > 256:
+            raise ValueError, "Invalid block length."
+        
+        self.flag = gen.next()
+        header += chr(self.flag)
+        self.next = sum(map(lambda x: gen.next() << x, range(0, 32, 8)))
+        header += struct.pack("<I", self.next)
+        
+        self.header_crc = sum(map(lambda x: gen.next() << x, range(0, 16, 8)))
+        
+        if self.crc(header) != self.header_crc:
+            print "Invalid block header.", self.crc(header), self.header_crc
+            raise ValueError, "Invalid block header."
+        
+        self.block = "".join(map(lambda x: chr(gen.next()), range(self.length)))
+        self.block_crc = sum(map(lambda x: gen.next() << x, range(0, 16, 8)))
+        
+        if self.crc(self.block) != self.block_crc:
+            print "Invalid block.", self.crc(self.block), self.block_crc
+            raise ValueError, "Invalid block."
+
+
 class Reader:
 
     def __init__(self, format, step, dt, reverse_polarity):
@@ -72,7 +124,7 @@ class Reader:
         
         self.T = 0
     
-    def read_samples(self, audio_f):
+    def read_byte(self, audio_f):
     
         sign = None
         t = 0
@@ -99,9 +151,9 @@ class Reader:
             if value > self.mean:
                 if sign == "-":
                     f = 1.0/t
-                    if 2000 <= f <= 2800:
+                    if 2200 <= f <= 2800:
                         new_current = "high"
-                    elif 1000 <= f <= 1400:
+                    elif 1100 <= f <= 1300:
                         new_current = "low"
                     else:
                         new_current = None
@@ -154,6 +206,20 @@ class Reader:
                 t += dt
             
             self.T += dt
+    
+    def read_block(self, audio_f):
+    
+        gen = self.read_byte(audio_f)
+        while True:
+        
+            byte = gen.next()
+            
+            if byte == 0x2a:
+                try:
+                    print ">", self.T
+                    yield Block(gen)
+                except ValueError:
+                    pass
 
 
 if __name__ == "__main__":
@@ -205,14 +271,17 @@ if __name__ == "__main__":
     last_T = 0
     data = []
     
-    for byte in reader.read_samples(audio_f):
+    #for byte in reader.read_byte(audio_f):
+    #
+    #    data.append(byte)
+    #    print reader.T, hex(byte)
+    #    if int(reader.T) > last_T:
+    #        last_T = int(reader.T)
+    #        sys.stdout.write("\r%02i:%02i" % (last_T/60, last_T % 60))
+    #        sys.stdout.flush()
+    #        #print ">", last_T
     
-        data.append(byte)
-        #print reader.T, hex(byte)
-        if int(reader.T) > last_T:
-            last_T = int(reader.T)
-            sys.stdout.write("\r%02i:%02i:%02i" % (last_T/3600, (last_T/60) % 60, last_T % 60))
-            sys.stdout.flush()
-            #print ">", last_T
+    for block in reader.read_block(audio_f):
+        print block.name, hex(block.load_addr), hex(block.exec_addr), block.number, block.length
     
     #sys.exit()
