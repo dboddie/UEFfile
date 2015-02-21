@@ -153,47 +153,63 @@ class Reader:
                     f = 1.0/t
                     if 2200 <= f <= 2800:
                         new_current = "high"
+                    elif 1500 <= f <= 1700:
+                        if current == "high":
+                            new_current = "low"
+                        else:
+                            new_current = "high"
                     elif 1100 <= f <= 1300:
                         new_current = "low"
                     else:
                         new_current = None
                     
-                    current = new_current
+                    # Only handle frequencies we recognise.
+                    if new_current:
                     
-                    if current == "high":
-                        if state == "waiting":
-                            state = "ready"
-                            #print self.T, state
-                        elif state == "after":
-                            state = "ready"
-                            #print self.T, state
-                            yield bits
-                        elif state == "data":
-                            cycles += 1
-                            if cycles == 2:
-                                bits = (bits >> 1) | 0x80
+                        current = new_current
+                        
+                        if current == "high":
+                            if state == "waiting":
+                                state = "ready"
+                                #print self.T, state
+                            elif state == "after":
+                                state = "ready"
+                                print self.T, state
+                                yield bits
+                            elif state == "data":
+                                cycles += 1
+                                if cycles == 2:
+                                    bits = (bits >> 1) | 0x80
+                                    shift += 1
+                                    cycles = 0
+                        
+                        elif current == "low":
+                            if state == "data":
+                                bits = bits >> 1
                                 shift += 1
-                                cycles = 0
-                    
-                    elif current == "low":
-                        if state == "data":
-                            bits = bits >> 1
-                            shift += 1
+                            
+                            elif state == "ready":
+                                state = "data"
+                                #print self.T, state
+                                bits = 0
+                                shift = 0
+                            
+                            cycles = 0
                         
-                        elif state == "ready":
-                            state = "data"
-                            #print self.T, state
-                            bits = 0
+                        if shift == 8:
+                            #print hex(bits)
+                            state = "after"
+                            shift = 0
                         
-                        cycles = 0
+                        print ">", self.T, f, state, hex(bits), shift
                     
-                    if shift == 8:
-                        #print hex(bits)
-                        state = "after"
-                        shift = 0
-                    
-                    t = 0
-                
+                    # Only reset the timer if dealing with frequencies below
+                    # the high tone frequency. This filters out high frequency
+                    # noise.
+                    if f > 2800:
+                        t += dt
+                    else:
+                        t = 0
                 else:
                     t += dt
                 
@@ -271,17 +287,17 @@ if __name__ == "__main__":
     last_T = 0
     data = []
     
-    #for byte in reader.read_byte(audio_f):
-    #
-    #    data.append(byte)
-    #    print reader.T, hex(byte)
-    #    if int(reader.T) > last_T:
-    #        last_T = int(reader.T)
-    #        sys.stdout.write("\r%02i:%02i" % (last_T/60, last_T % 60))
-    #        sys.stdout.flush()
-    #        #print ">", last_T
+    for byte in reader.read_byte(audio_f):
     
-    for block in reader.read_block(audio_f):
-        print block.name, hex(block.load_addr), hex(block.exec_addr), block.number, block.length
+        data.append(byte)
+        print reader.T, hex(byte)
+        if int(reader.T) > last_T:
+            last_T = int(reader.T)
+            #sys.stdout.write("\r%02i:%02i" % (last_T/60, last_T % 60))
+            #sys.stdout.flush()
+            #print ">", last_T
+    
+    #for block in reader.read_block(audio_f):
+    #    print block.name, hex(block.load_addr), hex(block.exec_addr), block.number, block.length
     
     #sys.exit()
