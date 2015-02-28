@@ -86,7 +86,7 @@ class Block(UEFfile.UEFfile):
         self.length = sum(map(lambda x: gen.next() << x, range(0, 16, 8)))
         header += struct.pack("<H", self.length)
         
-        #print self.name, hex(self.load_addr), hex(self.exec_addr), self.number, self.length
+        print self.name, hex(self.load_addr), hex(self.exec_addr), self.number, self.length
         
         if self.length > 256:
             raise ValueError, "Invalid block length."
@@ -98,6 +98,8 @@ class Block(UEFfile.UEFfile):
         
         self.header_crc = sum(map(lambda x: gen.next() << x, range(0, 16, 8)))
         
+        print self.flag, self.next, hex(self.header_crc)
+        
         if self.crc(header) != self.header_crc:
             print "Invalid block header.", self.crc(header), self.header_crc
             raise ValueError, "Invalid block header."
@@ -105,9 +107,14 @@ class Block(UEFfile.UEFfile):
         self.block = "".join(map(lambda x: chr(gen.next()), range(self.length)))
         self.block_crc = sum(map(lambda x: gen.next() << x, range(0, 16, 8)))
         
+        print repr(self.block), len(self.block)
+        
         if self.crc(self.block) != self.block_crc:
-            print "Invalid block.", self.crc(self.block), self.block_crc
+            print "Invalid block.", hex(self.crc(self.block)), hex(self.block_crc)
             raise ValueError, "Invalid block."
+        
+        print repr(self.block)
+        print hex(self.block_crc)
 
 
 class Reader:
@@ -119,7 +126,7 @@ class Reader:
         self.reverse_polarity = reverse_polarity
         
         samples_per_second = 1.0/dt
-        self.weight = samples_per_second
+        self.weight = 1200.0
         self.mean = 0
         
         self.T = 0
@@ -174,7 +181,7 @@ class Reader:
                                 #print self.T, state
                             elif state == "after":
                                 state = "ready"
-                                print self.T, state
+                                #print self.T, state
                                 yield bits
                             elif state == "data":
                                 cycles += 1
@@ -201,7 +208,7 @@ class Reader:
                             state = "after"
                             shift = 0
                         
-                        print ">", self.T, f, state, hex(bits), shift
+                        #print ">", self.T, f, state, hex(bits), shift
                     
                     # Only reset the timer if dealing with frequencies below
                     # the high tone frequency. This filters out high frequency
@@ -235,7 +242,7 @@ class Reader:
                     print ">", self.T
                     yield Block(gen)
                 except ValueError:
-                    pass
+                    raise
 
 
 if __name__ == "__main__":
@@ -287,17 +294,18 @@ if __name__ == "__main__":
     last_T = 0
     data = []
     
-    for byte in reader.read_byte(audio_f):
-    
-        data.append(byte)
-        print reader.T, hex(byte)
-        if int(reader.T) > last_T:
-            last_T = int(reader.T)
-            #sys.stdout.write("\r%02i:%02i" % (last_T/60, last_T % 60))
-            #sys.stdout.flush()
-            #print ">", last_T
-    
-    #for block in reader.read_block(audio_f):
-    #    print block.name, hex(block.load_addr), hex(block.exec_addr), block.number, block.length
+    if False:
+        for byte in reader.read_byte(audio_f):
+        
+            data.append(byte)
+            #print reader.T, hex(byte)
+            if int(reader.T) > last_T:
+                last_T = int(reader.T)
+                #sys.stdout.write("\r%02i:%02i" % (last_T/60, last_T % 60))
+                #sys.stdout.flush()
+                #print ">", last_T
+    else:
+        for block in reader.read_block(audio_f):
+            print block.name, hex(block.load_addr), hex(block.exec_addr), block.number, block.length
     
     #sys.exit()
