@@ -119,17 +119,22 @@ class Block(UEFfile.UEFfile):
 
 class Reader:
 
-    def __init__(self, format, step, dt, reverse_polarity):
+    def __init__(self, format, step, dt):
     
         self.format = format
         self.step = step
-        self.reverse_polarity = reverse_polarity
+        self.dt = dt
         
         samples_per_second = 1.0/dt
-        self.weight = 1200.0
+        self.weight = samples_per_second/100.0
         self.mean = 0
+        self.previous = 0
         
         self.T = 0
+    
+    def start_at(self, start_time):
+    
+        self.start_time = start_time
     
     def read_byte(self, audio_f):
     
@@ -141,6 +146,7 @@ class Reader:
         data = []
         bits = 0
         shift = 0
+        crossing = 0
         
         while True:
         
@@ -150,31 +156,47 @@ class Reader:
             
             values = struct.unpack(format, sample)
             value = values[0]
-            if self.reverse_polarity:
-                value = -value
+            
+            if self.T < self.start_time:
+                self.T += self.dt
+                continue
             
             self.mean = (value/self.weight) + self.mean * (1 - 1/self.weight)
             
-            if value > self.mean:
-                if sign == "-":
-                    f = 1.0/t
-                    if 2200 <= f <= 2800:
+            #print " ", self.T, audio_f.tell(), values
+            value -= self.mean
+            pv = self.previous
+            self.previous = value
+            
+            if t > 0 and (pv * value) < 0:
+            
+                tc = (value * self.dt)/(value - pv)
+                f = 1.0/(t - tc)
+                
+                crossing = 1 - crossing
+                
+                #print " ", self.T, f, crossing, state, current
+                
+                if crossing == 0:
+                
+                    if 2000 <= f <= 2800:
                         new_current = "high"
                     elif 1500 <= f <= 1700:
-                        if current == "high":
-                            new_current = "low"
-                        else:
-                            new_current = "high"
+                        # Out of sync by half a wavelength.
+                        new_current = None
+                        crossing = 1
                     elif 1100 <= f <= 1300:
                         new_current = "low"
                     else:
                         new_current = None
                     
+                    #print ">", self.T, f, new_current
                     # Only handle frequencies we recognise.
                     if new_current:
-                    
+
+                        #print ">", self.T, self.T - tc, f
                         current = new_current
-                        
+
                         if current == "high":
                             if state == "waiting":
                                 state = "ready"
@@ -189,46 +211,40 @@ class Reader:
                                     bits = (bits >> 1) | 0x80
                                     shift += 1
                                     cycles = 0
-                        
+                                    print "1", self.T, hex(bits)
+
                         elif current == "low":
                             if state == "data":
                                 bits = bits >> 1
                                 shift += 1
-                            
+                                print "0", self.T, hex(bits)
+
                             elif state == "ready":
                                 state = "data"
                                 #print self.T, state
                                 bits = 0
                                 shift = 0
-                            
+
                             cycles = 0
-                        
+
                         if shift == 8:
-                            #print hex(bits)
+                            print hex(bits)
                             state = "after"
                             shift = 0
-                        
+
                         #print ">", self.T, f, state, hex(bits), shift
                     
-                    # Only reset the timer if dealing with frequencies below
-                    # the high tone frequency. This filters out high frequency
-                    # noise.
-                    if f > 2800:
-                        t += dt
+                    if current or f < 1100:
+                        t = tc + self.dt
                     else:
-                        t = 0
+                        t += self.dt
+                    
                 else:
-                    t += dt
-                
-                sign = "+"
-            
-            elif value < self.mean:
-                sign = "-"
-                t += dt
+                    t += self.dt
             else:
-                t += dt
+                t += self.dt
             
-            self.T += dt
+            self.T += self.dt
     
     def read_block(self, audio_f):
     
@@ -253,10 +269,10 @@ if __name__ == "__main__":
     mono = find_option(args, "--mono", 0)
     unsigned = find_option(args, "--unsigned", 0)
     s, sample_size = find_option(args, "--size", 1)
-    reverse_polarity = find_option(args, "--reverse", 0)
+    start, start_time = find_option(args, "--start", 1)
     
     if len(args) != 2 or not s or not r:
-        sys.stderr.write("Usage: %s [--rate <sample rate in Hz>] [--mono] [--unsigned] [--size <sample size in bits>] <audio file> <UEF file>\n" % program_name)
+        sys.stderr.write("Usage: %s [--rate <sample rate in Hz>] [--mono] [--unsigned] [--size <sample size in bits>] [--start <time in seconds>] <audio file> <UEF file>\n" % program_name)
         sys.exit(1)
     
     audio_file = args[0]
@@ -277,6 +293,9 @@ if __name__ == "__main__":
         sys.stderr.write("Invalid sample size: %s\n" % sample_size)
         sys.exit(1)
     
+    if not start:
+        start_time = 0.0
+    
     step = int(sample_size/8)
     
     if sample_size == 8:
@@ -289,12 +308,13 @@ if __name__ == "__main__":
         format = format * 2
     
     format = "<" + format
-    reader = Reader(format, step, dt, reverse_polarity)
+    reader = Reader(format, step, dt)
+    reader.start_at(float(start_time))
     
     last_T = 0
     data = []
     
-    if False:
+    if True:
         for byte in reader.read_byte(audio_f):
         
             data.append(byte)
