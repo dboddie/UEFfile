@@ -569,6 +569,8 @@ def create_chunks(file_names, gaps = True):
             
             details = new_details
         
+        details = filter(lambda s: s, details)
+        
         # We should have details about the load and execution addresses
         
         # Open the file
