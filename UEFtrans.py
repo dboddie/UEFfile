@@ -734,17 +734,14 @@ def export_file(out_path, chunks, name, write_name, load, exe, length):
     
     if out_file == None:
     
-        # Try to open the file with a generic stem and put the
-        # real name in the .inf file
-        print 'Trying to create %s' % out_path+os.sep+stem+str(new_file)
+        # Try to open the file with a modified name and put the real name in
+        # the .inf file
+        write_name = write_name.replace(os.sep, "-")
+        print 'Trying to create %s' % out_path+os.sep+write_name
         try:
-            out_file = open(out_path + os.sep + stem + str(new_file), 'wb')
-            
-            # New name with the stem and number
-            write_name = stem + str(new_file)
-            new_file = new_file + 1
+            out_file = open(out_path + os.sep + write_name, 'wb')
         except IOError:
-            print "Couldn't open file %s" % out_path+os.sep+stem+str(new_file)
+            print "Couldn't open file %s" % out_path+os.sep+write_name
     
     if out_file != None:
     
@@ -2021,11 +2018,6 @@ if __name__ == '__main__':
 #            sys.exit()
         
         # There are files already present.
-        
-        # Stem for unknown filenames
-        created = []
-        stem = 'noname'
-        new_file = 0
         
         for position in positions:
         
