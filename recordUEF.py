@@ -224,7 +224,7 @@ class Reader:
                 
                 if total > self.threshold_1200:
                 
-                    current = "high"
+                    current = "low"
                     #print >>sys.stderr, "_"
                     
                     if state == "data":
@@ -243,7 +243,7 @@ class Reader:
                 
                 elif total > self.threshold_2400:
                 
-                    current = "low"
+                    current = "high"
                     #print >>sys.stderr, "*"
                     
                     if state == "waiting":
