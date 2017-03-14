@@ -19,7 +19,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import struct, sys
+import math, struct, sys
 import UEFfile
 
 def find_option(args, label, number = 0):
@@ -119,16 +119,12 @@ class Block(UEFfile.UEFfile):
 
 class Reader:
 
-    def __init__(self, format, step, dt):
+    def __init__(self, format, step, sample_rate):
     
         self.format = format
         self.step = step
-        self.dt = dt
-        
-        samples_per_second = 1.0/dt
-        self.weight = samples_per_second/100.0
-        self.mean = 0
-        self.previous = 0
+        self.sample_rate = sample_rate
+        self.dt = 1.0/sample_rate
         
         self.T = 0
     
@@ -136,17 +132,57 @@ class Reader:
     
         self.start_time = start_time
     
+    def V(self, V0, Vapp, R, C, dt):
+    
+        # The current that flows is due to the potential difference between the
+        # applied potential and the potential at the capacitor. The resistor acts
+        # to moderate this flow.
+        i = (Vapp - V0)/R
+        # Change the charge at the capacitor by the new charge transported by the
+        # electric current.
+        q = (C * V0) + (i * dt)
+        # Calculate the voltage over the capacitor.
+        V1 = q / C
+        V1 = max(-1.0, min(V1, 1.0))
+        
+        return V1, i
+    
     def read_byte(self, audio_f):
     
         sign = None
         t = 0
         state = "waiting"
         current = None
-        cycles = 0
         data = []
         bits = 0
         shift = 0
-        crossing = 0
+        
+        # Low-pass filter constants
+        resonant_f1 = 1200.0
+        R1 = 1000
+        C1 = 1.0/(2 * math.pi * resonant_f1 * R1)
+        
+        # High-pass filter constants
+        resonant_f2 = 1200.0
+        R2 = 1000
+        C2 = 1.0/(2 * math.pi * resonant_f2 * R2)
+        
+        Vc1 = 0
+        Vc2 = 0
+        
+        dt = self.dt
+        old_y = 0
+        y = 0
+        old_dy = 0
+        dy = 0
+        old_ddy = 0
+        ddy = 0
+        
+        previous = None
+        tc = 0
+        cycles = 0
+        
+        f = open("/tmp/data.s8", "wb")
         
         while True:
         
@@ -154,98 +190,97 @@ class Reader:
             if not sample:
                 raise StopIteration
             
-            values = struct.unpack(format, sample)
-            value = values[0]
-            
             if self.T < self.start_time:
                 self.T += self.dt
                 continue
             
-            self.mean = (value/self.weight) + self.mean * (1 - 1/self.weight)
+            values = struct.unpack(format, sample)
+            value = values[0]
             
-            #print " ", self.T, audio_f.tell(), values
-            value -= self.mean
-            pv = self.previous
-            self.previous = value
+            Vapp = value/16.0
+            # Apply the low-pass filter.
+            Vc1, i1 = self.V(Vc1, Vapp, R1, C1, dt)
+            # Apply the high-pass filter to the output of the low-pass filter.
+            Vc2, i2 = self.V(Vc2, Vc1, R2, C2, dt)
             
-            if t > 0 and (pv * value) < 0:
+            y = max(-1.0, min(i2 * R2, 1.0))
+            dy = y - old_y
+            ddy = dy - old_dy
             
-                tc = (value * self.dt)/(value - pv)
-                f = 1.0/(t - tc)
-                
-                crossing = 1 - crossing
-                
-                #print " ", self.T, f, crossing, state, current
-                
-                if crossing == 0:
-                
-                    if 2000 <= f <= 2800:
-                        new_current = "high"
-                    elif 1500 <= f <= 1700:
-                        # Out of sync by half a wavelength.
-                        new_current = None
-                        crossing = 1
-                    elif 1100 <= f <= 1300:
-                        new_current = "low"
-                    else:
-                        new_current = None
-                    
-                    #print ">", self.T, f, new_current
-                    # Only handle frequencies we recognise.
-                    if new_current:
-
-                        #print ">", self.T, self.T - tc, f
-                        current = new_current
-
-                        if current == "high":
-                            if state == "waiting":
-                                state = "ready"
-                                #print self.T, state
-                            elif state == "after":
-                                state = "ready"
-                                #print self.T, state
-                                yield bits
-                            elif state == "data":
-                                cycles += 1
-                                if cycles == 2:
-                                    bits = (bits >> 1) | 0x80
-                                    shift += 1
-                                    cycles = 0
-                                    print "1", self.T, hex(bits)
-
-                        elif current == "low":
-                            if state == "data":
-                                bits = bits >> 1
-                                shift += 1
-                                print "0", self.T, hex(bits)
-
-                            elif state == "ready":
-                                state = "data"
-                                #print self.T, state
-                                bits = 0
-                                shift = 0
-
-                            cycles = 0
-
-                        if shift == 8:
-                            print hex(bits)
-                            state = "after"
-                            shift = 0
-
-                        #print ">", self.T, f, state, hex(bits), shift
-                    else:
-                        state = "waiting"
-                    
-                    if current or f < 1100:
-                        t = tc + self.dt
-                    else:
-                        t += self.dt
-                    
+            old_dy_ = old_dy
+            old_ddy_ = old_ddy
+            
+            period = self.T - tc
+            freq = 1/period
+            
+            error = abs(old_dy_ + old_ddy_- dy)/freq
+            print "%.5f" % self.T, freq, error
+            cross = old_dy > 0 and dy <= 0.0 and y > 0 and error < 0.0001
+            
+            old_y = y
+            old_dy = dy
+            old_ddy = ddy
+            
+            f.write(struct.pack("<b", max(0, y * 127)))
+            
+            if cross:
+            
+                if freq > 3000:
+                    self.T += self.dt
+                    continue
+                elif freq > 1800:
+                    current = "high"
+                    pending = False
+                elif freq < 1300:
+                    current = "low"
+                    pending = False
+                elif current == "low":
+                    current = "high"
                 else:
-                    t += self.dt
-            else:
-                t += self.dt
+                    current = "low"
+                
+                tc = self.T
+                
+                if current == "high":
+
+                    if state == "waiting":
+                        state = "ready"
+                        #print self.T, state
+                    elif state == "after":
+                        state = "ready"
+                        #print self.T, state
+                        yield bits
+                    elif state == "data":
+                        cycles += 1
+                        if cycles == 2:
+                            bits = (bits >> 1) | 0x80
+                            shift += 1
+                            cycles = 0
+                            print "1", self.T, hex(bits)
+                        else:
+                            print "-", self.T, hex(bits)
+
+                else:
+                
+                    if state == "data":
+                        bits = bits >> 1
+                        shift += 1
+                        print "0", self.T, hex(bits)
+
+                    elif state == "ready":
+                        state = "data"
+                        #print self.T, state
+                        bits = 0
+                        shift = 0
+
+                    cycles = 0
+
+                if shift == 8:
+                    print hex(bits), repr(chr(bits))
+                    state = "after"
+                    shift = 0
             
+            #sys.stdout.write("\r%f" % self.T)
             self.T += self.dt
     
     def read_block(self, audio_f):
@@ -310,13 +345,14 @@ if __name__ == "__main__":
         format = format * 2
     
     format = "<" + format
-    reader = Reader(format, step, dt)
+    reader = Reader(format, step, int(sample_rate))
     reader.start_at(float(start_time))
     
     last_T = 0
     data = []
+    blocks = []
     
-    if True:
+    if False:
         for byte in reader.read_byte(audio_f):
         
             data.append(byte)
@@ -328,6 +364,7 @@ if __name__ == "__main__":
                 #print ">", last_T
     else:
         for block in reader.read_block(audio_f):
-            print block.name, hex(block.load_addr), hex(block.exec_addr), block.number, block.length
+            #print block.name, hex(block.load_addr), hex(block.exec_addr), block.number, block.length
+            blocks.append(block)
     
     #sys.exit()
