@@ -19,7 +19,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import struct, sys
+import math, struct, sys
 import numpy as np
 import UEFfile
 
@@ -136,6 +136,21 @@ class Reader:
     
         self.start_time = start_time
     
+    def V(self, V0, Vapp, R, C, dt):
+    
+        # The current that flows is due to the potential difference between the
+        # applied potential and the potential at the capacitor. The resistor acts
+        # to moderate this flow.
+        i = (Vapp - V0)/R
+        # Change the charge at the capacitor by the new charge transported by the
+        # electric current.
+        q = (C * V0) + (i * dt)
+        # Calculate the voltage over the capacitor.
+        V1 = q / C
+        V1 = max(-1.0, min(V1, 1.0))
+        
+        return V1, i
+    
     def read_byte(self, audio_f):
     
         sign = None
@@ -153,8 +168,20 @@ class Reader:
         f1200 = np.where(f == 1200.0)[0][0]
         f2400 = np.where(f == 2400.0)[0][0]
         
-        s1 = np.zeros(l, np.int8)
-        s2 = np.zeros(l, np.int8)
+        # Low-pass filter constants
+        resonant_f1 = 1200.0
+        R1 = 1000
+        C1 = 1.0/(2 * math.pi * resonant_f1 * R1)
+        
+        # High-pass filter constants
+        resonant_f2 = 1200.0
+        R2 = 1000
+        C2 = 1.0/(2 * math.pi * resonant_f2 * R2)
+        
+        Vc1 = 0
+        Vc2 = 0
+        
+        s1 = np.zeros(l)
         i = 0
         
         while True:
@@ -163,9 +190,20 @@ class Reader:
             if not sample:
                 raise StopIteration
             
+            if self.T < self.start_time:
+                self.T += self.dt
+                continue
+            
             values = struct.unpack(format, sample)
             value = values[0]
-            s1[i] = value
+            
+            Vapp = value/16.0
+            # Apply the low-pass filter.
+            Vc1, i1 = self.V(Vc1, Vapp, R1, C1, self.dt)
+            # Apply the high-pass filter to the output of the low-pass filter.
+            Vc2, i2 = self.V(Vc2, Vc1, R2, C2, self.dt)
+            
+            s1[i] = max(-1.0, min(i2 * R2, 1.0))
             
             i += 1
             
@@ -184,66 +222,49 @@ class Reader:
                     print self.T, max_f1
                 
                 if max_f1 == 2400.0:
-                    new_current = "high"
+                    current = "high"
                 elif max_f1 == 1200.0:
-                    new_current = "low"
+                    current = "low"
+                elif current == "low":
+                    current = "high"
                 else:
-                    new_current = None
+                    current = "low"
                 
-                # Only handle frequencies we recognise.
-                if new_current:
-
-                    #print ">", self.T, self.T - tc, f
-                    current = new_current
-                    
-                    if current == "high":
-                    
-                        if state == "waiting":
-                            state = "ready"
-                            #print self.T, state
-                        
-                        elif state == "after":
-                            state = "ready"
-                            print self.T, state
-                            yield bits
-                        
-                        elif state == "data":
-                            bits = (bits >> 1) | 0x80
-                            shift += 1
-                            print "1", self.T, hex(bits)
-                            #print "1",
-                    
-                    elif current == "low":
-                    
-                        if state == "data":
-                            bits = bits >> 1
-                            shift += 1
-                            print "0", self.T, hex(bits)
-                            #print "0",
-                        
-                        elif state == "ready":
-                            state = "data"
-                            print self.T, state
-                            bits = 0
-                            shift = 0
-                    
-                    if shift == 8:
-                        print hex(bits)
-                        state = "after"
-                        shift = 0
+                if current == "high":
                 
-                elif state == "data":
+                    if state == "waiting":
+                        state = "ready"
+                        #print self.T, state
+                    
+                    elif state == "after":
+                        state = "ready"
+                        #print self.T, state
+                        yield bits
+                    
+                    elif state == "data":
+                        bits = (bits >> 1) | 0x80
+                        shift += 1
+                        #print "1", self.T, hex(bits)
+                        #print "1",
                 
-                    if max_f1 == 0.0:
-                        keep = l/2
-                        s1[:keep] = s1[l - keep:]
-                        i = keep
-                    else:
-                        state = "waiting"
-                        shift = 0
+                elif current == "low":
+                
+                    if state == "data":
+                        bits = bits >> 1
+                        shift += 1
+                        #print "0", self.T, hex(bits)
+                        #print "0",
+                    
+                    elif state == "ready":
+                        state = "data"
+                        #print self.T, state
                         bits = 0
+                        shift = 0
                 
-                s2[:] = s1[:]
+                if shift == 8:
+                    print hex(bits)
+                    state = "after"
+                    shift = 0
             
             self.T += self.dt
     
@@ -312,6 +333,7 @@ if __name__ == "__main__":
     
     last_T = 0
     data = []
+    blocks = []
     
     if False:
         for byte in reader.read_byte(audio_f):
@@ -326,5 +348,6 @@ if __name__ == "__main__":
     else:
         for block in reader.read_block(audio_f):
             print block.name, hex(block.load_addr), hex(block.exec_addr), block.number, block.length
+            blocks.append(block)
     
     #sys.exit()

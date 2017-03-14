@@ -119,12 +119,14 @@ class Block(UEFfile.UEFfile):
 
 class Reader:
 
-    def __init__(self, format, step, sample_rate):
+    def __init__(self, format, step, sample_rate, threshold_1200, threshold_2400):
     
         self.format = format
         self.step = step
         self.sample_rate = sample_rate
         self.dt = 1.0/sample_rate
+        self.threshold_1200 = threshold_1200
+        self.threshold_2400 = threshold_2400
         
         self.T = 0
     
@@ -181,6 +183,11 @@ class Reader:
         previous = None
         tc = 0
         cycles = 0
+        total = 0
+        
+        weight = 2400.0
+        floor_count = 0
+        zero_count = self.sample_rate/4800
         
         f = open("/tmp/data.s8", "wb")
         
@@ -191,7 +198,7 @@ class Reader:
                 raise StopIteration
             
             if self.T < self.start_time:
-                self.T += self.dt
+                self.T += dt
                 continue
             
             values = struct.unpack(format, sample)
@@ -203,46 +210,42 @@ class Reader:
             # Apply the high-pass filter to the output of the low-pass filter.
             Vc2, i2 = self.V(Vc2, Vc1, R2, C2, dt)
             
-            y = max(-1.0, min(i2 * R2, 1.0))
+            y = max(0.0, min(i2 * R2, 1.0))
             dy = y - old_y
-            ddy = dy - old_dy
-            
-            old_dy_ = old_dy
-            old_ddy_ = old_ddy
-            
-            period = self.T - tc
-            freq = 1/period
-            
-            error = abs(old_dy_ + old_ddy_- dy)/freq
-            print "%.5f" % self.T, freq, error
-            cross = old_dy > 0 and dy <= 0.0 and y > 0 and error < 0.0001
+            total += (min(old_y, y) + abs(dy)/2)*weight*dt
             
             old_y = y
-            old_dy = dy
-            old_ddy = ddy
             
-            f.write(struct.pack("<b", max(0, y * 127)))
+            f.write(struct.pack("<b", y * 127))
             
-            if cross:
+            if dy < 0 and y == 0:
             
-                if freq > 3000:
-                    self.T += self.dt
-                    continue
-                elif freq > 1800:
-                    current = "high"
-                    pending = False
-                elif freq < 1300:
-                    current = "low"
-                    pending = False
-                elif current == "low":
-                    current = "high"
-                else:
-                    current = "low"
+                #print >>sys.stderr, "%.5f" % (self.T - self.start_time), total,
                 
-                tc = self.T
+                if total > self.threshold_1200:
                 
-                if current == "high":
+                    current = "high"
+                    #print >>sys.stderr, "_"
+                    
+                    if state == "data":
+                        bits = bits >> 1
+                        shift += 1
+                        #print "0", self.T, hex(bits)
 
+                    elif state == "ready":
+                        state = "data"
+                        #print self.T, state
+                        bits = 0
+                        shift = 0
+
+                    cycles = 0
+                    total = 0
+                
+                elif total > self.threshold_2400:
+                
+                    current = "low"
+                    #print >>sys.stderr, "*"
+                    
                     if state == "waiting":
                         state = "ready"
                         #print self.T, state
@@ -256,32 +259,33 @@ class Reader:
                             bits = (bits >> 1) | 0x80
                             shift += 1
                             cycles = 0
-                            print "1", self.T, hex(bits)
-                        else:
-                            print "-", self.T, hex(bits)
-
-                else:
+                            #print "1", self.T, hex(bits)
+                        #else:
+                        #    print "-", self.T, hex(bits)
+                    
+                    total = 0
                 
-                    if state == "data":
-                        bits = bits >> 1
-                        shift += 1
-                        print "0", self.T, hex(bits)
-
-                    elif state == "ready":
-                        state = "data"
-                        #print self.T, state
-                        bits = 0
-                        shift = 0
-
-                    cycles = 0
-
+                else:
+                    #print >>sys.stderr, "?"
+                    current = "floor"
+                
+                floor_count = 0
+                
                 if shift == 8:
-                    print hex(bits), repr(chr(bits))
+                    #print hex(bits), repr(chr(bits))
                     state = "after"
                     shift = 0
             
-            #sys.stdout.write("\r%f" % self.T)
-            self.T += self.dt
+            elif y == 0 and current == "floor":
+            
+                floor_count += 1
+                
+                #print >>sys.stderr, "?", floor_count, total
+                if floor_count >= zero_count:
+                    total = 0
+            
+            sys.stdout.write("\r%f" % self.T)
+            self.T += dt
     
     def read_block(self, audio_f):
     
@@ -292,7 +296,7 @@ class Reader:
             
             if byte == 0x2a:
                 try:
-                    print ">", self.T
+                    #print ">", self.T
                     yield Block(gen)
                 except ValueError:
                     raise
@@ -345,7 +349,7 @@ if __name__ == "__main__":
         format = format * 2
     
     format = "<" + format
-    reader = Reader(format, step, int(sample_rate))
+    reader = Reader(format, step, int(sample_rate), 0.2, 0.05)
     reader.start_at(float(start_time))
     
     last_T = 0
@@ -364,7 +368,7 @@ if __name__ == "__main__":
                 #print ">", last_T
     else:
         for block in reader.read_block(audio_f):
-            #print block.name, hex(block.load_addr), hex(block.exec_addr), block.number, block.length
+            print >>sys.stderr, block.name, hex(block.load_addr), hex(block.exec_addr), block.number, block.length
             blocks.append(block)
     
     #sys.exit()
