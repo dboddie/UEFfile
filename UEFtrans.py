@@ -203,7 +203,7 @@ def read_block(chunk):
     a = 1
     while 1:
         c = block[a]
-        if ord(c) != 0:        # was > 32:
+        if ord(c) != 0:
             name = name + c
         a = a + 1
         if ord(c) == 0:
