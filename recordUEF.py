@@ -147,11 +147,12 @@ class Block(UEFfile.UEFfile):
 
 class Reader:
 
-    def __init__(self, format, step, sample_rate, debug):
+    def __init__(self, format, step, sample_rate, boost_factor, debug):
     
         self.format = format
         self.step = step
         self.sample_rate = sample_rate
+        self.boost_factor = boost_factor
         self.debug = debug
         
         self.dt = 1.0/sample_rate
@@ -209,8 +210,11 @@ class Reader:
             
             self.cycles = 0
         
-        elif width >= self.width_2400:
+        elif width >= self.width_2400 or (self.ymax > 0 and 2000 <= 1/(tc - self.last_tc) <= 3000):
         
+            # The pulse was large enough to be a 1 pulse, or one occurred close
+            # enough to where one might be expected.
+            
             self.current = "high"
             #print >>sys.stderr, "*"
             
@@ -279,6 +283,7 @@ class Reader:
         
         previous = None
         tc = 0
+        self.last_tc = 0
         mean = 0.0
         
         start_t = None
@@ -289,7 +294,7 @@ class Reader:
         
         floor_count = 0
         zero_count = self.sample_rate/6200
-        mean_count = self.sample_rate/7800
+        mean_count = self.sample_rate/3900
         
         if self.debug:
             f = open("/tmp/debug.s8", "wb")
@@ -308,7 +313,7 @@ class Reader:
             
             mean = ((mean * (mean_count - 1)) + value)/mean_count
             
-            Vapp = (value - mean)/8.0
+            Vapp = (value - mean) * self.boost_factor/8.0
             # Apply the low-pass filter.
             Vc1, i1 = self.V(Vc1, Vapp, R1, C1, dt)
             # Apply the high-pass filter to the output of the low-pass filter.
@@ -342,6 +347,7 @@ class Reader:
                 
                 if floor_count >= zero_count:
                 
+                    self.last_tc = tc
                     tc = (start_t + end_t)/2.0
                     width = end_t - start_t
                     
@@ -390,6 +396,7 @@ if __name__ == "__main__":
     stop, stop_time = find_option(args, "--stop", 1)
     debug = find_option(args, "--debug", 0)
     right = find_option(args, "--right", 0)
+    boost, boost_factor = find_option(args, "--boost", 1)
     
     if len(args) != 2 or not s or not r:
         sys.stderr.write("Usage: %s [--rate <sample rate in Hz>] [--mono] [--unsigned] [--size <sample size in bits>] [--start <time in seconds>] <audio file> <UEF file>\n" % program_name)
@@ -416,6 +423,9 @@ if __name__ == "__main__":
     if not start:
         start_time = 0.0
     
+    if not boost_factor:
+        boost_factor = 1.0
+    
     step = int(sample_size/8)
     
     if right:
@@ -431,7 +441,7 @@ if __name__ == "__main__":
         format = format * 2
     
     format = "<" + format
-    reader = Reader(format, step, int(sample_rate), debug)
+    reader = Reader(format, step, int(sample_rate), float(boost_factor), debug)
     reader.start_at(float(start_time))
     print "Seeking to", float(start_time)
     audio_f.seek(step * int(start_time) * int(sample_rate), 1)
