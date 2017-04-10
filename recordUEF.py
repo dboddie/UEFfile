@@ -69,11 +69,26 @@ def hms(t):
     
     st = ""
     if h > 0:
-        st += str(h) + ":"
+        st += "%i:" % h
     if h > 0 or m > 0:
-        st += str(m) + ":"
+        st += "%02i:" % m
     
-    return st + ("%.5f" % s)
+    i = s - int(s)
+    return st + ("%08.5f" % s)
+
+
+def from_hms(text):
+
+    pieces = text.split(":")
+    
+    total = 0
+    factor = 1
+    
+    while pieces:
+        total += float(pieces.pop()) * factor
+        factor *= 60
+    
+    return total
 
 
 class Block(UEFfile.UEFfile):
@@ -105,7 +120,7 @@ class Block(UEFfile.UEFfile):
         header += struct.pack("<H", self.length)
         
         if debug:
-            print >>sys.stderr, repr(self.name), hex(self.load_addr), hex(self.exec_addr), self.number, self.length
+            print >>sys.stderr, repr(self.name), hex(self.load_addr), hex(self.exec_addr), hex(self.number), self.length
         
         if self.length > 256:
             raise ValueError("Invalid block length (%i)." % self.length)
@@ -147,12 +162,15 @@ class Block(UEFfile.UEFfile):
 
 class Reader:
 
-    def __init__(self, format, step, sample_rate, boost_factor, debug):
+    def __init__(self, format, step, sample_rate, boost_factor, filter_,
+                       quiet, debug):
     
         self.format = format
         self.step = step
         self.sample_rate = sample_rate
         self.boost_factor = boost_factor
+        self.filter_ = filter_
+        self.quiet = quiet
         self.debug = debug
         
         self.dt = 1.0/sample_rate
@@ -205,8 +223,8 @@ class Reader:
                 self.shift = 0
             
             elif self.state == "after":
-                raise ValueError("Expected high tone at %.5f (%.5f)." % (
-                    tc, tc - self.start_time))
+                raise ValueError("Expected high tone at %s (%.5f)." % (
+                    hms(tc), tc - self.start_time))
             
             self.cycles = 0
         
@@ -299,6 +317,9 @@ class Reader:
         if self.debug:
             f = open("/tmp/debug.s8", "wb")
         
+        if self.filter_:
+            buf = []
+        
         while True:
         
             sample = audio_f.read(self.step)
@@ -310,6 +331,23 @@ class Reader:
             
             values = struct.unpack(format, sample)
             value = values[0]
+            
+            if self.filter_:
+            
+                buf.append(value)
+                
+                if len(buf) < 3:
+                    self.T += dt
+                    continue
+                
+                #print "", buf[0], buf[1], buf[2]
+                
+                if buf[0] * buf[1] < 0 and buf[0] * buf[2] > 0:
+                    if self.debug:
+                        print >>sys.stderr, " spike at", self.T, buf[1], "->", (buf[0] + buf[2])/2.0
+                    buf[1] = (buf[0] + buf[2])/2.0
+                
+                value = buf.pop(0)
             
             mean = ((mean * (mean_count - 1)) + value)/mean_count
             
@@ -363,8 +401,8 @@ class Reader:
                     floor_count = 0
                     start_t = None
             
-            if not self.debug:
-                sys.stdout.write("\r%f" % self.T)
+            if not self.debug and not quiet:
+                sys.stdout.write("\r%s " % hms(self.T))
             
             old_y = y
             self.T += dt
@@ -397,9 +435,11 @@ if __name__ == "__main__":
     debug = find_option(args, "--debug", 0)
     right = find_option(args, "--right", 0)
     boost, boost_factor = find_option(args, "--boost", 1)
+    filter_ = find_option(args, "--filter", 0)
+    quiet = find_option(args, "--quiet", 0)
     
     if len(args) != 2 or not s or not r:
-        sys.stderr.write("Usage: %s [--rate <sample rate in Hz>] [--mono] [--unsigned] [--size <sample size in bits>] [--start <time in seconds>] <audio file> <UEF file>\n" % program_name)
+        sys.stderr.write("Usage: %s [--rate <sample rate in Hz>] [--mono] [--unsigned] [--size <sample size in bits>] [--start <time in seconds>] [--stop <time in seconds>] [--boost <factor>] [--filter] <audio file> <UEF file>\n" % program_name)
         sys.exit(1)
     
     audio_file = args[0]
@@ -422,6 +462,8 @@ if __name__ == "__main__":
     
     if not start:
         start_time = 0.0
+    else:
+        start_time = from_hms(start_time)
     
     if not boost_factor:
         boost_factor = 1.0
@@ -441,13 +483,14 @@ if __name__ == "__main__":
         format = format * 2
     
     format = "<" + format
-    reader = Reader(format, step, int(sample_rate), float(boost_factor), debug)
+    reader = Reader(format, step, int(sample_rate), float(boost_factor),
+                    filter_, quiet, debug)
     reader.start_at(float(start_time))
     print "Seeking to", float(start_time)
-    audio_f.seek(step * int(start_time) * int(sample_rate), 1)
+    audio_f.seek(step * float(start_time) * int(sample_rate), 1)
     
     if stop:
-        reader.stop_at(float(stop_time))
+        reader.stop_at(from_hms(stop_time))
     
     last_T = 0
     data = []
@@ -466,10 +509,13 @@ if __name__ == "__main__":
     else:
         for block in reader.read_block(audio_f):
             if not debug:
-                print "", hms(block.T), block.name, hex(block.load_addr), hex(block.exec_addr), block.number, block.length
+                print hms(block.T), block.name, hex(block.load_addr), hex(block.exec_addr), hex(block.number), block.length
             else:
-                print "%.2f (%s)" % (block.T, hms(block.T)), block.name, hex(block.load_addr), hex(block.exec_addr), block.number, block.length
+                print "%.2f (%s)" % (block.T, hms(block.T)), block.name, hex(block.load_addr), hex(block.exec_addr), hex(block.number), block.length
             blocks.append(block)
+    
+    if not debug:
+        print
     
     u = UEFfile.UEFfile(creator = 'recordUEF.py ' + version)
     u.minor = 6
