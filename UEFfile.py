@@ -455,7 +455,16 @@ class UEFfile:
         else:
             last = 0
 
-        return (name, load, exec_addr, block[a+19:-2], block_number, last)
+        # Try to cope with UEFs that contain junk data at the end of blocks.
+        rest = block[a+19:][:258]
+        in_crc = crc(rest[:-2])
+        if in_crc != str2num(2, rest[-2:]):
+            print "Warning: block %x of file %s has mismatching CRC." % (
+                block_number, repr(name))
+
+        data = rest[:-2]
+
+        return (name, load, exec_addr, data, block_number, last)
 
 
     def write_block(self, block, name, load, exe, n, last = 0, flags = 0):

@@ -219,7 +219,27 @@ def read_block(chunk):
     else:
         last = 0
     
-    return (name, load, exec_addr, block[a+19:-2], block_number, last)
+    # Try to cope with UEFs that contain junk data at the end of blocks.
+    rest = block[a+19:][:258]
+    bad_crc = False
+    
+    while rest:
+        in_crc = crc(rest[:-2])
+        if in_crc != str2num(2, rest[-2:]):
+            bad_crc = True
+            rest = rest[:-2]
+        else:
+            if bad_crc:
+                print "Removed excess data in block %x of file %s." % (
+                    block_number, repr(name))
+            break
+    else:
+        print "Warning: block %x of file %s has mismatching CRC." % (
+                block_number, repr(name))
+    
+    data = rest[:-2]
+    
+    return (name, load, exec_addr, data, block_number, last)
 
 
 def write_block(f, name, load, exe, length, n):
